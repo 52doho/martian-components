@@ -14,10 +14,11 @@ import (
 )
 
 func init() {
-	parse.Register("modify_request_body", FromJSON)
+	parse.Register("modify_request_body", FromJSON_modify_request_body)
+	parse.Register("copy_urlquery_to_body", FromJSON_copy_urlquery_to_body)
 }
 
-func FromJSON(b []byte) (*parse.Result, error) {
+func FromJSON_modify_request_body(b []byte) (*parse.Result, error) {
 	var config []config
 	if err := json.Unmarshal(b, &config); err != nil {
 		return nil, err
@@ -92,6 +93,47 @@ func (m *RequestBodyModifier) ModifyRequest(req *http.Request) error {
 	var bodyModified map[string]interface{}
 	bodyModified, _ = flatten.Get([]string{}).(map[string]interface{})
 	data, err := json.Marshal(bodyModified)
+	if err != nil {
+		return err
+	}
+
+	req.ContentLength = int64(len(data))
+	req.Body = ioutil.NopCloser(bytes.NewReader(data))
+
+	return nil
+}
+
+// copy_urlquery_to_body
+type CopyUrlQueryToBodyModifier struct {
+	Keys []string
+}
+
+func FromJSON_copy_urlquery_to_body(b []byte) (*parse.Result, error) {
+	var keys []string
+	if err := json.Unmarshal(b, &keys); err != nil {
+		return nil, err
+	}
+	msg := CopyUrlQueryToBodyModifier{
+		Keys: keys,
+	}
+	return parse.NewResult(&msg, []parse.ModifierType{parse.Request})
+}
+
+func (m *CopyUrlQueryToBodyModifier) ModifyRequest(req *http.Request) error {
+	body, err := ioutil.ReadAll(req.Body)
+
+	var bodyJson map[string]interface{}
+	if err := json.Unmarshal(body, &bodyJson); err != nil {
+		log.Printf("CopyUrlQueryToBodyModifier json.Unmarshal err: %v", err)
+		bodyJson = make(map[string]interface{})
+	}
+	// copy url query to body
+	query := req.URL.Query()
+	for _, k := range m.Keys {
+		bodyJson[k] = query[k]
+	}
+
+	data, err := json.Marshal(bodyJson)
 	if err != nil {
 		return err
 	}
