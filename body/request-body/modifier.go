@@ -1,11 +1,13 @@
 // Package requestbody registers a request modifier for modify request bodies
-package krakend
+package requestbody
 
 import (
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"strings"
 
 	"github.com/devopsfaith/flatmap/tree"
 	"github.com/google/martian/parse"
@@ -16,20 +18,35 @@ func init() {
 }
 
 func FromJSON(b []byte) (*parse.Result, error) {
-	var ops []flatmapOp
-	if err := json.Unmarshal(b, &ops); err != nil {
+	var config []config
+	if err := json.Unmarshal(b, &config); err != nil {
 		return nil, err
+	}
+	ops := []flatmapOp{}
+	for _, c := range config {
+		op := flatmapOp{}
+		op.Type = c.Type
+		op.Args = make([][]string, len(c.Args))
+		for k, arg := range c.Args {
+			op.Args[k] = strings.Split(arg, ".")
+		}
+		ops = append(ops, op)
 	}
 
 	msg := RequestBodyModifier{
 		Ops: ops,
 	}
 
-	return parse.NewResult(msg, []parse.ModifierType{parse.Request})
+	return parse.NewResult(&msg, []parse.ModifierType{parse.Request})
 }
 
 type RequestBodyModifier struct {
 	Ops []flatmapOp
+}
+
+type config struct {
+	Type string   `json:"type"`
+	Args []string `json:"args"`
 }
 
 type flatmapOp struct {
@@ -42,11 +59,14 @@ func (m *RequestBodyModifier) ModifyRequest(req *http.Request) error {
 	if err != nil {
 		return err
 	}
-	req.Body.Close()
+	if len(body) == 0 {
+		return nil
+	}
 
 	var bodyJson map[string]interface{}
-	if err := json.Unmarshal(body, bodyJson); err != nil {
-		return err
+	if err := json.Unmarshal(body, &bodyJson); err != nil {
+		log.Printf("json.Unmarshal err: %v", err)
+		return nil
 	}
 
 	flatten, err := tree.New(bodyJson)
@@ -63,6 +83,8 @@ func (m *RequestBodyModifier) ModifyRequest(req *http.Request) error {
 			for _, k := range op.Args {
 				flatten.Del(k)
 			}
+		case "add":
+			flatten.Add(op.Args[0], op.Args[1][0])
 		default:
 		}
 	}
