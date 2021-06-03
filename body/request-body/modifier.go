@@ -130,7 +130,10 @@ func (m *CopyUrlQueryToBodyModifier) ModifyRequest(req *http.Request) error {
 	// copy url query to body
 	query := req.URL.Query()
 	for _, k := range m.Keys {
-		bodyJson[k] = query[k]
+		values := query[k]
+		if len(values) > 0 {
+			bodyJson[k] = values[0]
+		}
 	}
 
 	data, err := json.Marshal(bodyJson)
